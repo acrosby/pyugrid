@@ -2,16 +2,15 @@ import netCDF4
 import numpy as np
 from ugrid import ugrid as ug
 
-def open_cf_todict( filename ):
-    nc = netCDF4.Dataset(filename, 'r')
+def iter_meshes(nc):
     ncvars = nc.variables
-    meshes = {}
+    meshes = []
     for varname in ncvars.iterkeys():
         try:
             meshname = ncvars[varname].getncattr('mesh')
         except AttributeError:
             meshname = None
-        if (meshname != None) and (meshname not in set(meshes.viewkeys())):
+        if (meshname != None) and (meshname not in set(meshes)):
             meshatt_names = ncvars[meshname].ncattrs()
             
             ## Make sure that this mesh style is supported in this codebase
@@ -55,8 +54,27 @@ def open_cf_todict( filename ):
                         edges = edges - index_base
             except:
                 pass #TODO: Generate edge node topology if none exists, perhaps optional
-  
-            ## Add to dictionary of meshes
-            meshes[meshname] = ug(nodes, faces, edges)
+            meshses.append(meshname)
+            yield meshname, nodes, faces, edges
+
+def open_cf_todict( filename ):
+    nc = netCDF4.Dataset(filename, 'r')
+    meshes = {}
+    for meshname, nodes, faces, edges in iter_meshes(nc):
+        ## Add to dictionary of meshes
+        meshes[meshname] = ug(nodes, faces, edges)
     return meshes # Return dictionary of ugrid objects
+
+def open_cf_itaps( filename ):
+    from itaps import iBase, iMesh
+    nc = netCDF4.Dataset(filename, 'r')
+    meshes = iMesh.Mesh()
+    for meshname, nodes, faces, edges in iter_meshes(nc):
+        meshset = meshes.createEndSet(ordered=False)
+        mesh_name = meshset.createTag("mesh_name", 1, str)
+        mesh_name = meshname
+        verts = mesh.createVtx(nodes)
+        meshset.add(verts)
+        quads, status = meshset.createEntArr(iMesh.Topology.triangle)
+        
     
