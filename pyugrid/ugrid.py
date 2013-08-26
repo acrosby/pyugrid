@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 """
 ugrid classes
 
@@ -20,6 +21,10 @@ import numpy as np
 # used for simple locate_face test
 #from py_geometry.cy_point_in_polygon import point_in_poly as point_in_tri
 from .util import point_in_tri
+
+IND_DT = np.int32 ## datatype used for indexes -- might want to change for 64 bit some day.
+NODE_DT = np.float64 ## datatype used for node coordinates
+
 
 class data_set(object):
     """
@@ -67,7 +72,7 @@ class data_set_indexed(data_set):
         if (indexes is None) ^  (data is None):
             raise ValueError("indexes and data both need to be either None or have values")
         if indexes is None:
-            self.indexes = np.zeros((0,), dtype=np.int32)
+            self.indexes = np.zeros((0,), dtype=IND_DT) 
         else:
             self.indexes = indexes
         if data is None:
@@ -89,7 +94,11 @@ class UGrid(object):
     the internal structure mirrors the netcdf data standard.
     """
 
-    def __init__(self, nodes=None, faces=[], edges=[], ):
+    def __init__(self,
+                 nodes=None,
+                 faces=None,
+                 edges=None,
+                 face_face_connectivity=None):
         """
         ugrid class -- holds, saves, etc an unstructured grid
 
@@ -97,17 +106,30 @@ class UGrid(object):
         :param faces=[] : the faces of the grid -- (NX3) integer array of indexes into the nodes array
         :param edges=[] : the edges of the grid -- (NX2) integer array of indexes into the nodes array
 
-        often this is too much data to pass in in a literal -- so usually
+        often this is too much data to pass in a literal -- so usually
         specialized constructors will be used instead (load from file, etc.)
         """
 
         if nodes is None:
-            self._nodes = np.zeros((0,2), dtype=np.float64)
+            self._nodes = np.zeros((0,2), dtype=NODE_DT)
         else:
-            self._nodes = np.asarray(nodes, dtype=np.float64).reshape((-1, 2))
+            self._nodes = np.asarray(nodes, dtype=NODE_DT).reshape((-1, 2))
 
-        self._faces = np.asarray(faces, dtype=np.int32).reshape((-1, 3))
-        self._edges = np.asarray(edges, dtype=np.int32).reshape((-1, 2))
+        if faces is None:
+            self._faces = None
+        else:
+            self._faces = np.asarray(faces, dtype=IND_DT).reshape((-1, 3))
+
+        if edges is None:
+            self._edges = None
+        else:
+            self._edges = np.asarray(edges, dtype=IND_DT).reshape((-1, 2))
+
+        if face_face_connectivity is None:
+            self._face_face_connectivity = None
+        else:
+            self._face_face_connectivity = np.asarray(face_face_connectivity, dtype=IND_DT).reshape((-1, self.num_vertices))
+
 
         self._node_data = {}
         self._edge_data = {}
@@ -119,6 +141,16 @@ class UGrid(object):
         existing nodes, etc.
         """
         raise NotImplimentedError
+    
+    @property
+    def num_vertices(self):
+        """
+        number of vertices in a face
+        """
+        if self._faces is None:
+            return None
+        else:
+            return self._faces.shape[1]
 
     @property
     def nodes(self):
@@ -127,13 +159,13 @@ class UGrid(object):
     def nodes(self, nodes_coords):
         # room here to do consistency checking, etc.
         # for now -- simply make sure it's a numpy array
-        self._nodes = np.asarray(nodes_coords, dtype=np.float64).reshape((-1, 2))
+        self._nodes = np.asarray(nodes_coords, dtype=NODE_DT).reshape((-1, 2))
     @nodes.deleter
     def nodes(self):
         ## if there are no nodes, there can't be any faces or edges
-        self._nodes = np.zeros((0,2), dtype=np.float64)
-        self._edges = np.zeros((0,2), dtype=np.int32)
-        self._faces = np.zeros((0,3), dtype=np.int32)
+        self._nodes = np.zeros((0,2), dtype=NODE_DT)
+        self._edges = None
+        self._faces = None
 
     @property
     def faces(self):
@@ -142,10 +174,10 @@ class UGrid(object):
     def faces(self, faces_indexes):
         # room here to do consistency checking, etc.
         # for now -- simply make sure it's a numpy array
-        self._faces = np.asarray(faces_indexes, dtype=np.int32).reshape((-1, 3))
+        self._faces = np.asarray(faces_indexes, dtype=IND_DT).reshape((-1, 3))
     @faces.deleter
     def faces(self):
-        self._faces = np.zeros((0,3), dtype=np.int32)
+        self._faces = None
 
     @property
     def edges(self):
@@ -154,10 +186,23 @@ class UGrid(object):
     def edges(self, edges_indexes):
         # room here to do consistency checking, etc.
         # for now -- simply make sure it's a numpy array
-        self._edges = np.asarray(edges_indexes, dtype=np.int32).reshape((-1, 2))
+        self._edges = np.asarray(edges_indexes, dtype=IND_DT).reshape((-1, 2))
     @edges.deleter
     def edges(self):
-        self._edges = np.zeros((0,2), dtype=np.int32)
+        self._edges = None
+
+    @property
+    def face_face_connectivity(self):
+        return self._face_face_connectivity
+    @face_face_connectivity.setter
+    def face_face_connectivity(self, face_face_connectivity):
+        ## admore checking?
+        face_face_connectivity = np.asarray(face_face_connectivity, dtype=IND_DT).reshape((-1, self.num_vertices))
+    @face_face_connectivity.deleter
+    def face_face_connectivity(self):
+        self._face_face_connectivity = None
+
+
 
 ##fixme: repeated code here -- should these methods be combined?
     def set_node_data(self, name, data, indexes=None):
@@ -167,14 +212,14 @@ class UGrid(object):
                 raise ValueError("size of data should match number of nodes") # shape should match edges, data type can be anything
             self._node_data[name] = data
         else:
-            indexes = np.array(indexes, dtype=np.int32).reshape((-1,))
+            indexes = np.array(indexes, dtype=IND_DT).reshape((-1,))
             self._node_data[name][indexes] = data
 
     def get_node_data(self, name, indexes=None):
         if indexes is None:
             return self._node_data[name]
         else:
-            indexes = np.array(indexes, dtype=np.int32).reshape((-1,))
+            indexes = np.array(indexes, dtype=IND_DT).reshape((-1,))
             return self._node_data[name][indexes]
 
     def set_edge_data(self, name, data, indexes=None):
@@ -184,14 +229,14 @@ class UGrid(object):
                 raise ValueError("size of data shold match number of edges") # shape should match edges, data type can be anything
             self._edge_data[name] = data
         else:
-            indexes = np.array(indexes, dtype=np.int32).reshape((-1,))
+            indexes = np.array(indexes, dtype=IND_DT).reshape((-1,))
             self._edge_data[name][indexes] = data
 
     def get_edge_data(self, name, indexes=None):
         if indexes is None:
             return self._edge_data[name]
         else:
-            indexes = np.array(indexes, dtype=np.int32).reshape((-1,))
+            indexes = np.array(indexes, dtype=IND_DT).reshape((-1,))
             return self._edge_data[name][indexes]
 
     def set_face_data(self, name, data, indexes=None):
@@ -201,14 +246,14 @@ class UGrid(object):
                 raise ValueError("size of data shold match number of faces") # shape should match faces, data type can be anything
             self._face_data[name] = data
         else:
-            indexes = np.array(indexes, dtype=np.int32).reshape((-1,))
+            indexes = np.array(indexes, dtype=IND_DT).reshape((-1,))
             self._face_data[name][indexes] = data
 
     def get_face_data(self, name, indexes=None):
         if indexes is None:
             return self._face_data[name]
         else:
-            indexes = np.array(indexes, dtype=np.int32).reshape((-1,))
+            indexes = np.array(indexes, dtype=IND_DT).reshape((-1,))
             return self._face_data[name][indexes]
 
 
@@ -225,12 +270,59 @@ class UGrid(object):
         """
         for i, face in enumerate(self._faces):
             f = self._nodes[face]
-            #print "checking:", point, "in", f
-            if point_in_tri(f, point):
-                #print "got a hit:", i
+            if point_in_poly(f, point):
                 return i
         return None
 
+    def build_face_face_connectivity(self):
+        """
+        builds the face_face_connectivity array:
+        essentially giving the neighbors of each triangle
+        """        
+        num_vertices = self.num_vertices
+        num_faces = self.faces.shape[0]
+        face_face = np.zeros( (num_faces, num_vertices), dtype=IND_DT )
+        face_face += -1 # fill with -1
+
+        # loop through all the triangles to find the matching edges:
+        edges = {} # dict to store the edges in 
+        for i, face in enumerate(self.faces):
+            # loop through edges:
+            for j in range(num_vertices):
+                edge = (face[j-1], face[j])
+                if edge[0] > edge[1]: # sort the node numbers
+                    edge = (edge[1], edge[0]) 
+                # see if it is already in there
+                prev_edge = edges.pop(edge, None)
+                if prev_edge is not None:
+                    face_num, edge_num = prev_edge
+                    face_face[i,j] = face_num
+                    face_face[face_num, edge_num] = i
+                else:
+                    edges[edge] = (i, j)
+        self._face_face_connectivity = face_face
+
+    def build_edges(self):
+        """
+        builds the edges array: all the edges defined by the triangles
+
+        NOTE: arbitrary order -- should the order be preserved?
+        """        
+        num_vertices = self.num_vertices
+        num_faces = self.faces.shape[0]
+        face_face = np.zeros( (num_faces, num_vertices), dtype=IND_DT )
+        face_face += -1 # fill with -1
+
+        # loop through all the faces to find all the edges:
+        edges = set() # use a set so no duplicates
+        for i, face in enumerate(self.faces):
+            # loop through edges:
+            for j in range(num_vertices):
+                edge = (face[j-1], face[j])
+                if edge[0] > edge[1]: # flip them
+                    edge = (edge[1], edge[0]) 
+                edges.add(edge)
+        self._edges = np.array(list(edges), dtype=IND_DT)
 
 
     def save_as_netcdf(self, filepath):
@@ -265,12 +357,13 @@ class UGrid(object):
         nclocal.createDimension('two', 2)
 
         #mesh topology
-        mesh = nclocal.createVariable('mesh', np.int32, (), )
-        mesh.cf_role = "mesh_topology"
-        mesh.long_name = "Topology data of 2D unstructured mesh"
-        mesh.topology_dimension = 2
-        mesh.node_coordinates = "node_lon node_lat"
-        mesh.face_node_connectivity = "mesh_face_nodes"
+        mesh = nclocal.createVariable('mesh', IND_DT, (), )
+        mesh.cf_role = "mesh_topology" 
+        mesh.long_name = "Topology data of 2D unstructured mesh" 
+        mesh.topology_dimension = 2 
+        mesh.node_coordinates = "node_lon node_lat" 
+        mesh.face_node_connectivity = "mesh_face_nodes" 
+
         mesh.edge_node_connectivity = "mesh_edge_nodes"  ## attribute required if variables will be defined on edges
         mesh.edge_coordinates = "mesh_edge_lon mesh_edge_lat"  ## optional attribute (requires edge_node_connectivity)
         mesh.face_coordinates = "mesh_face_lon mesh_face_lat" ##  optional attribute
@@ -278,7 +371,7 @@ class UGrid(object):
         mesh.face_face_connectivity = "mesh_face_links"  ## optional attribute
 
         face_nodes = nclocal.createVariable("mesh_face_nodes",
-                                            np.int32,
+                                            IND_DT,
                                             ('num_faces', 'num_vertices'),
                                             )
         face_nodes[:] = self.faces
@@ -288,7 +381,7 @@ class UGrid(object):
         face_nodes.start_index = 0 ;
 
         edge_nodes = nclocal.createVariable("mesh_edge_nodes",
-                                            np.int32,
+                                            IND_DT,
                                             ('num_edges', 'two'),
                                             )
         edge_nodes[:] = self.edges
