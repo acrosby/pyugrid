@@ -1,6 +1,6 @@
 import netCDF4
 import numpy as np
-from ugrid import ugrid as ug
+#from ugrid import ugrid as ug
 
 def iter_meshes(nc):
     ncvars = nc.variables
@@ -54,7 +54,7 @@ def iter_meshes(nc):
                         edges = edges - index_base
             except:
                 pass #TODO: Generate edge node topology if none exists, perhaps optional
-            meshses.append(meshname)
+            meshes.append(meshname)
             yield meshname, nodes, faces, edges
 
 def open_cf_todict( filename ):
@@ -70,11 +70,15 @@ def open_cf_itaps( filename ):
     nc = netCDF4.Dataset(filename, 'r')
     meshes = iMesh.Mesh()
     for meshname, nodes, faces, edges in iter_meshes(nc):
-        meshset = meshes.createEndSet(ordered=False)
-        mesh_name = meshset.createTag("mesh_name", 1, str)
-        mesh_name = meshname
-        verts = mesh.createVtx(nodes)
+        meshset = meshes.createEntSet(ordered=False)
+        #mesh_name = meshset.createTag("mesh_name", 1, str)
+        #mesh_name = meshname
+        #print faces
+        verts = meshes.createVtx(faces.T)
         meshset.add(verts)
-        quads, status = meshset.createEntArr(iMesh.Topology.triangle)
+        #print verts
+        tris, status = meshes.createEnt(iMesh.Topology.triangle, verts)
+        meshset.add(tris)
+    return meshes
         
     
